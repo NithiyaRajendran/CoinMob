@@ -1,0 +1,71 @@
+name: iOS Build
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      # 1️⃣ Checkout the repo
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      # 2️⃣ Set Xcode (usually optional, but ensures correct Xcode)
+      - name: Set up Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+
+      # 3️⃣ Decode your certificate and provisioning profile
+      - name: Decode Certificates
+        env:
+          IOS_CERT_BASE64: ${{ secrets.IOS_CERT_BASE64 }}
+          IOS_PROV_PROFILE_BASE64: ${{ secrets.IOS_PROV_PROFILE_BASE64 }}
+        run: |
+          echo "$IOS_CERT_BASE64" | base64 --decode > ios_distribution.p12
+          echo "$IOS_PROV_PROFILE_BASE64" | base64 --decode > provisioning_profile.mobileprovision
+
+      # 4️⃣ Import certificate into temporary keychain
+      - name: Import Certificate
+        env:
+          CERT_PASSWORD: ${{ secrets.CERT_PASSWORD }}
+        run: |
+          security create-keychain -p "" build.keychain
+          security import ios_distribution.p12 -k ~/Library/Keychains/build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -s ~/Library/Keychains/build.keychain
+          security unlock-keychain -p "" ~/Library/Keychains/build.keychain
+          security set-keychain-settings -t 3600 -l ~/Library/Keychains/build.keychain
+
+      # 5️⃣ Install provisioning profile
+      - name: Install Provisioning Profile
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp provisioning_profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+
+      # 6️⃣ Build the app with xcodebuild
+      - name: Build iOS App
+        run: |
+          xcodebuild \
+            -workspace CoinMob.xcworkspace \
+            -scheme YourAppScheme \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath $GITHUB_WORKSPACE/build/CoinMob.xcarchive \
+            clean archive
+
+      # 7️⃣ Export .ipa
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath $GITHUB_WORKSPACE/build/YourApp.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath $GITHUB_WORKSPACE/build
+
+      # 8️⃣ Upload IPA as artifact
+      - name: Upload IPA
+        uses: actions/upload-artifact@v3
+        with:
+          name: CoinMob.ipa
+          path: ./build/*.ipa
