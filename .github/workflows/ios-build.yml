@@ -9,35 +9,42 @@ jobs:
     runs-on: macos-latest
 
     steps:
+      # 1️⃣ Checkout code
       - uses: actions/checkout@v3
 
+      # 2️⃣ Setup Node (React Native)
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
           node-version: 20
 
+      # 3️⃣ Install dependencies
       - name: Install dependencies
         run: npm install
 
+      # 4️⃣ Decode certificates & provisioning profile
       - name: Decode Certificates
         run: |
-          echo ${{ secrets.IOS_P12_BASE64 }} | base64 --decode > ios_distribution.p12
-          echo ${{ secrets.IOS_PROV_PROFILE_BASE64 }} | base64 --decode > provisioning_profile.mobileprovision
+          echo "${{ secrets.IOS_P12_BASE64 }}" | base64 --decode > ios_distribution.p12
+          echo "${{ secrets.IOS_PROV_PROFILE_BASE64 }}" | base64 --decode > provisioning_profile.mobileprovision
 
+      # 5️⃣ Build iOS App
       - name: Build iOS App
         run: |
-          xcodebuild -workspace ios/YourApp.xcworkspace \
-                     -scheme YourAppScheme \
+          mkdir -p build
+          xcodebuild -workspace ios/CoinMob.xcworkspace \
+                     -scheme CoinMob \
                      -configuration Release \
-                     -archivePath $PWD/build/YourApp.xcarchive archive
+                     -archivePath $PWD/build/CoinMob.xcarchive archive
 
           xcodebuild -exportArchive \
-                     -archivePath $PWD/build/YourApp.xcarchive \
-                     -exportOptionsPlist ExportOptions.plist \
+                     -archivePath $PWD/build/CoinMob.xcarchive \
+                     -exportOptionsPlist ios/ExportOptions.plist \
                      -exportPath $PWD/build
 
+      # 6️⃣ Upload IPA artifact
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: MyApp.ipa
+          name: CoinMob.ipa
           path: ./build/*.ipa
