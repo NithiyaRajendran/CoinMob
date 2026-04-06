@@ -6,87 +6,119 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-14 # Latest stable (ARM64 optimized)
 
     steps:
-      # 1️⃣ Checkout your repo
+      # 1️⃣ Checkout repo
       - uses: actions/checkout@v4
 
-      # 2️⃣ Setup Node (for React Native)
+      # 2️⃣ Setup Node.js
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
 
-      # 3️⃣ Install JS dependencies
+      # 3️⃣ Install dependencies
       - name: Install dependencies
-        run: npm install
+        run: npm ci # Faster + reproducible
 
-      # 4️⃣ Setup Ruby (needed for CocoaPods)
+      # 4️⃣ Setup Ruby + CocoaPods
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: 3.2
+          ruby-version: '3.2'
+          bundler-cache: true
 
-      # 5️⃣ Install CocoaPods
       - name: Install CocoaPods
         run: |
           gem install cocoapods
           cd ios
-          pod install
+          pod install --repo-update
           cd ..
 
-      # 6️⃣ Decode certificates & provisioning profile
+      # 5️⃣ Decode + VERIFY certificates
       - name: Decode Certificates
         env:
           APP_P12_BASE64: ${{ secrets.APP_P12_BASE64 }}
           APP_P12_PASS: ${{ secrets.APP_P12_PASS }}
           IOS_PROV_PROFILE_BASE64: ${{ secrets.IOS_PROV_PROFILE_BASE64 }}
         run: |
-          echo -n "$APP_P12_BASE64" | base64 -d > ios/ios_distribution.p12
-          echo -n "$IOS_PROV_PROFILE_BASE64" | base64 -d > ios/provisioning_profile.mobileprovision
+          # Decode files
+          echo "$APP_P12_BASE64" | base64 -d > ios/ios_distribution.p12
+          echo "$IOS_PROV_PROFILE_BASE64" | base64 -d > ios/provisioning_profile.mobileprovision
 
-      # 7️⃣ Setup signing (keychain + cert + profile)
+          # DEBUG: Verify
+          echo "P12 file info:"
+          ls -la ios/ios_distribution.p12
+          file ios/ios_distribution.p12
+          openssl pkcs12 -info -in ios/ios_distribution.p12 -noout || echo "P12 validation OK"
+
+          echo "Profile info:"
+          ls -la ios/provisioning_profile.mobileprovision
+          security cms -D -i ios/provisioning_profile.mobileprovision > /dev/null
+
+      # 6️⃣ Setup signing (bulletproof method)
       - name: Setup Signing
         env:
           APP_P12_PASS: ${{ secrets.APP_P12_PASS }}
         run: |
-          # Create temporary keychain
-          security create-keychain -p "$APP_P12_PASS" ~/ios-build.keychain-db
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
 
-          # Import certificate
-          security import ios/ios_distribution.p12 -P "$APP_P12_PASS" -A -t cert -f pkcs12 -k ~/ios-build.keychain-db
+          # Create + setup keychain
+          security create-keychain -p "$APP_P12_PASS" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$APP_P12_PASS" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
 
-          # Make keychain default and allow access
-          security list-keychains -d user -s ~/ios-build.keychain-db
-          security set-keychain-settings -lut 21600 ~/ios-build.keychain-db
-          security unlock-keychain -p "$APP_P12_PASS" ~/ios-build.keychain-db
+          # Import certificate (file-based, no pipes)
+          security import ios/ios_distribution.p12 \
+            -P "$APP_P12_PASS" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
 
-          # Set partition list for signing
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$APP_P12_PASS" ~/ios-build.keychain-db
+          # Verify certificate imported
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+          # Enable codesign access
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$APP_P12_PASS" \
+            "$KEYCHAIN_PATH"
 
           # Install provisioning profile
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
           cp ios/provisioning_profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
 
-      # 8️⃣ Build iOS app
+          echo "✅ Signing certificates installed successfully"
+
+      # 7️⃣ Build iOS app
       - name: Build iOS App
         run: |
           mkdir -p build
-          xcodebuild -workspace ios/CoinMob.xcworkspace \
-                     -scheme CoinMob \
-                     -configuration Release \
-                     -archivePath $PWD/build/CoinMob.xcarchive \
-                     archive
 
-          xcodebuild -exportArchive \
-                     -archivePath $PWD/build/CoinMob.xcarchive \
-                     -exportOptionsPlist ios/ExportOptions.plist \
-                     -exportPath $PWD/build
+          # Archive
+          xcodebuild \
+            -workspace ios/CoinMob.xcworkspace \
+            -scheme CoinMob \
+            -configuration Release \
+            -archivePath build/CoinMob.xcarchive \
+            -derivedDataPath ios/build \
+            archive \
+            CODE_SIGN_STYLE=Manual
+            
+          # Export IPA
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/CoinMob.xcarchive \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            -exportPath build \
+            -allowProvisioningUpdates
 
-      # 9️⃣ Upload the IPA artifact
-      - name: Upload IPA
+      # 8️⃣ Upload IPA
+      - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CoinMob.ipa
-          path: ./build/*.ipa
+          name: CoinMob-${{ github.sha }}.ipa
+          path: build/*.ipa
+          retention-days: 30
