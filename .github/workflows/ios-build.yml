@@ -9,26 +9,40 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      # 1️⃣ Checkout code
+      # 1️⃣ Checkout your repo
       - uses: actions/checkout@v3
 
-      # 2️⃣ Setup Node (React Native)
+      # 2️⃣ Setup Node (for React Native)
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
           node-version: 20
 
-      # 3️⃣ Install dependencies
+      # 3️⃣ Install JS dependencies
       - name: Install dependencies
         run: npm install
 
-      # 4️⃣ Decode certificates & provisioning profile
+      # 4️⃣ Setup Ruby (needed for CocoaPods)
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 3.2
+
+      # 5️⃣ Install CocoaPods
+      - name: Install CocoaPods
+        run: |
+          gem install cocoapods
+          cd ios
+          pod install
+          cd ..
+
+      # 6️⃣ Decode certificates & provisioning profile
       - name: Decode Certificates
         run: |
-          echo "${{ secrets.IOS_P12_BASE64 }}" | base64 --decode > ios_distribution.p12
-          echo "${{ secrets.IOS_PROV_PROFILE_BASE64 }}" | base64 --decode > provisioning_profile.mobileprovision
+          echo ${{ secrets.IOS_P12_BASE64 }} | base64 --decode > ios/ios_distribution.p12
+          echo ${{ secrets.IOS_PROV_PROFILE_BASE64 }} | base64 --decode > ios/provisioning_profile.mobileprovision
 
-      # 5️⃣ Build iOS App
+      # 7️⃣ Build iOS app
       - name: Build iOS App
         run: |
           mkdir -p build
@@ -42,7 +56,7 @@ jobs:
                      -exportOptionsPlist ios/ExportOptions.plist \
                      -exportPath $PWD/build
 
-      # 6️⃣ Upload IPA artifact
+      # 8️⃣ Upload the IPA artifact
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
