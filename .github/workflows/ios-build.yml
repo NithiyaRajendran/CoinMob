@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14 # Latest stable (ARM64 optimized)
+    runs-on: macos-14-large # Latest stable (ARM64 optimized)
 
     steps:
       # 1️⃣ Checkout repo
