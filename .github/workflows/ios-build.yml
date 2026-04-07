@@ -7,7 +7,7 @@ on:
 jobs:
   build:
     runs-on: macos-14-large # Latest stable (ARM64 optimized)
-
+    # version update
     steps:
       # 1️⃣ Checkout repo
       - uses: actions/checkout@v4
